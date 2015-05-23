@@ -1,0 +1,225 @@
+---
+title: "Practical Machine Learning Project"
+output: html_document
+---
+
+Machine learning prediction exercise for the "Weight Lifting Exercise Dataset"" (http://groupware.les.inf.puc-rio.br/har)
+
+#### Download the data
+
+```{r eval=FALSE}
+# download training data
+url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+trainingFile="pml-training.csv"
+download.file(url, destfile=trainingFile, method="curl")
+# download test data
+url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+testingFile="pml-testing.csv"
+download.file(url, destfile=testingFile, method="curl")
+```
+
+#### Load training and test data into R
+
+```{r eval=TRUE, warning=FALSE, message=FALSE}
+# load training data
+trainingFile="pml-training.csv"
+data.train <- read.csv(trainingFile, header=TRUE, sep=",")
+# load test data
+testingFile="pml-testing.csv"
+data.test <- read.csv(testingFile, header=TRUE, sep=",")
+
+##  load required and useful packages
+library(caret)
+library(randomForest)
+library(gplots)
+library(RColorBrewer)
+library(AppliedPredictiveModeling)
+```
+
+### Data Exploration
+
+Examination of the data shows a number of non-informative columns as well as many with large fractions of missing values, either null or NA. The non-informative colums were removed along with any column with more than 10% missing or NA values.
+
+A number of the columns are factor variables consisting of a large number of unique factors represented as floating point numbers. Thus, the factor data was converted to numerical type. Columns with just 2 factors are null or division by 0, and will therefore be eliminated.
+
+```{r eval=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+##  remove non-informative data colums:
+##   1:7
+##   amplitude_yaw_belt (19)
+##   amplitude_yaw_dumbbell (101) 
+##   amplitude_yaw_forearm (139)
+use.train <- data.train[,-c(1:7,26,101,139)]
+##  result column index
+n.rows <- dim(use.train)[1]
+result.idx <- dim(use.train)[2]
+##  maximum fraction of missing values to retain a data column
+max.nas <- 0.1
+
+##  Identify factor variables
+
+factor.list <- c()
+factor.counts <- c()
+for (i in names(use.train[-result.idx])) {
+    if (is.factor(use.train[[i]])) {
+        factor.list <- c(factor.list, i)
+        factor.counts <- c(factor.counts, nlevels(use.train[[i]]))
+        print(paste(i, " :: ", nlevels(use.train[[i]])))
+    }
+}
+
+##  Convert factor data to numerical type and missing values to NAs.
+##  Null values (numerical or factor) will be nonverted to NAs.
+##  Remove data columns with a large fraction of NAs (max.na)
+
+for (i in names(use.train[-result.idx])) {
+    use.train[[i]] <- as.numeric(as.character(use.train[[i]]))
+    frac.nas <- length(use.train[[i]][is.na(use.train[[i]])]) / n.rows
+    if (frac.nas > max.nas) {
+        # remove column
+        use.train <- use.train[,-which(names(use.train) %in% c(i))]
+    }
+}
+result.idx <- dim(use.train)[2]
+```
+
+#### Predictor correlation heatmap
+
+To identify groups of similar predictors a heatmap of the pairwise correlations was generated. Predictors with correlation values close to 1 or -1 are related and therefore not independent. These can be either pruned or combined into co-factors in order to test ways pf improving the model. Initially, this step is left to the automatic treatment by the caret package preProcess function.
+
+```{r fig.width=10, fig.height=10, warning=FALSE, message=FALSE, eval=TRUE, cache=TRUE}
+
+##  calculate pair-wise correlations for all predictors
+train.cor <- as.matrix(cor(use.train[,-result.idx],use.train[,-result.idx]))
+
+##  display the most correlated or anti-correlated predictor pairs
+for (i in dimnames(train.cor)[[1]]) {
+    for (j in dimnames(train.cor)[[2]]) {
+        if (i != j && abs(train.cor[i,j]) > 0.8) {
+            print(paste(i, " : ", j, " => cor=", train.cor[i,j], sep=''))
+        }
+    }
+}
+
+##  set up a color palette to emphasize high correlation pairs
+my_palette <- colorRampPalette(c("cyan","blue","black","black","black","brown", "yellow"))(n=20)
+##  draw heatmap
+heatmap.2(train.cor, 
+          symm=TRUE,
+          main="Predictor Correlations", # heat map title
+          notecol="black",       # change font color of cell labels to black
+          density.info="none",   # turn off density plot inside color legend
+          trace="none",          # turn off trace lines inside the heatmap
+          margins=c(12,9),       # widen margins around plot
+          col=my_palette,        # choose color palette
+          keysize=1.,            # size of color legend image
+          key.par=list(cex=0.7), # key text size
+          key.xlab="Correlation value", # color key axis label
+          dendrogram="none"      # no dendrogram
+#          dendrogram="row")      # draw row dendrogram
+)
+
+```
+
+A feature plot can also be used to visually examine the similarity between feature pairs. Given the large number of features, it is impractical to look at a full pairwise view, therefore, individual features can be compared based on the heatmap correlation information. Below is an example of 3 highly correlated predictors: 'roll_belt','accel_belt_y','accel_belt_z'. Data smapling (1000 random rows of 19622 in full training set) is used to prevent loss of visibility of overlapping data points from different classes.
+
+```{r fig.width=10, fig.height=10, warning=FALSE, message=FALSE, eval=TRUE, cache=FALSE}
+
+transparentTheme(trans = .4)
+
+myColors <- c("#000000", "#7fff00", "#8b0000", "#9932cc", "#ff7f00", "#458b00", "#008b8b", "#0000ff", "#ffff00" )
+pch_vector <- rep(16, 5)
+my_settings <- list(superpose.symbol=list(alpha=rep(.4,5), col=myColors, cex=rep(0.8, 5), 
+               fill=myColors, font=rep(1, 5), pch=pch_vector))
+##  example
+set.seed(51515)
+use.train.slice <- use.train[sample(nrow(use.train), 1000),]
+featurePlot(x=use.train.slice[,c('roll_belt','accel_belt_y','accel_belt_z')], y=use.train.slice$classe, 
+            plot="pairs", auto.key=list(columns = 5), par.settings=my_settings)
+```
+
+Two pre-processing strategies were tested. First, using principal components and removing all NAs. Second, centering and scaling all predictors, and using knn imputation for missing data.
+
+A random forest model was built for each training data set with 5-fold cross validation. Construction of these models is time consuming. Accuracy for the PCA-based model was 0.974, and 0.995 for the knn imputed data.
+
+
+```{r eval=TRUE, warning=FALSE, message=FALSE, cache=TRUE}
+
+set.seed(1966)
+inTrain = createDataPartition(use.train$classe, p=0.7, list=FALSE)
+training = use.train[ inTrain,]    ## 70% of the data
+testing = use.train[-inTrain,]     ## 30% of the data
+```
+
+```{r eval=TRUE, warning=FALSE, message=FALSE, cache=TRUE}
+###
+###   PCA pre-processing
+###
+
+## last column is the result (classe)
+preProc.1 <- preProcess(training[,-result.idx], na.remove = TRUE, method="pca", thresh=.9)
+trainPC.1 <- predict(preProc.1, training[,-result.idx])
+modFit.1 <- train(training$classe ~ ., data=trainPC.1, method="rf", trControl=trainControl(method="cv", number=5),
+                 prox=TRUE, allowParallel=TRUE)
+print(modFit.1)
+```
+
+```{r eval=TRUE, warning=FALSE, message=FALSE, cache=TRUE}
+modFit.1$finalModel
+```
+
+```{r eval=TRUE, warning=FALSE, message=FALSE, cache=TRUE}
+testPC.1 <- predict(preProc.1, testing[,-result.idx])
+cm.1 <- confusionMatrix(testing$classe, predict(modFit.1, testPC.1))
+cm.1
+```
+
+```{r eval=TRUE, warning=FALSE, message=FALSE, cache=TRUE}
+###
+###   knn imputation pre-processing
+###
+
+training = use.train[ inTrain,]    ## 70% of the data
+testing = use.train[-inTrain,]     ## 30% of the data
+
+preProc.2 <- preProcess(training[,-result.idx], k=5, knnSummary=mean, method=c("center", "scale", "knnImpute"))
+
+trainPC.2 <- predict(preProc.2, training[,-result.idx])
+
+modFit.2 <- train(training$classe ~ ., data=trainPC.2, method="rf", trControl=trainControl(method="cv",number=5),
+                prox=TRUE, allowParallel=TRUE)
+print(modFit.2)
+```
+
+```{r eval=TRUE, warning=FALSE, message=FALSE, cache=TRUE}
+modFit.2$finalModel
+```
+
+```{r eval=TRUE, warning=FALSE, message=FALSE, cache=TRUE}
+testPC.2 <- predict(preProc.2, testing[,-result.idx])
+cm.2 <- confusionMatrix(testing$classe, predict(modFit.2, testPC.2))
+cm.2
+```
+
+##### Prediction of 20 test cases.
+
+Test case data has to be pre-processed in the same way as the training data prior to caret preProcess handling. Specifically, conversion of factor column data to numeric type.
+
+For the final prediction, the second model was selected, being more accurate on the training data.
+
+```{r eval=TRUE, warning=FALSE, message=FALSE, cache=TRUE}
+
+##  pre-process test case data as training data
+use.test <- data.test[,-c(1:7,26,101,139)]
+
+for (i in names(use.test)) {
+    if (i %in% names(use.train)) {
+        use.test[[i]] <- as.numeric(as.character(use.test[[i]]))
+    } else {
+        use.test <- use.test[,-which(names(use.test) %in% c(i))]
+    }
+}
+
+test.pred <- predict(preProc.2, use.test)
+new.pred.res <- predict(modFit.2, test.pred)
+new.pred.res
+```
