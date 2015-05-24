@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+
+<meta charset="utf-8">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="pandoc" />
+
+
+
+<title>Practical Machine Learning Project</title>
+
+<script src="Project_short_files/jquery-1.11.0/jquery.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link href="Project_short_files/bootstrap-2.3.2/css/bootstrap.min.css" rel="stylesheet" />
+<link href="Project_short_files/bootstrap-2.3.2/css/bootstrap-responsive.min.css" rel="stylesheet" />
+<script src="Project_short_files/bootstrap-2.3.2/js/bootstrap.min.js"></script>
+
+<style type="text/css">code{white-space: pre;}</style>
+<link rel="stylesheet"
+      href="Project_short_files/highlight/default.css"
+      type="text/css" />
+<script src="Project_short_files/highlight/highlight.js"></script>
+<style type="text/css">
+  pre:not([class]) {
+    background-color: white;
+  }
+</style>
+<script type="text/javascript">
+if (window.hljs && document.readyState && document.readyState === "complete") {
+   window.setTimeout(function() {
+      hljs.initHighlighting();
+   }, 0);
+}
+</script>
+
+
+
+</head>
+
+<body>
+
+<style type = "text/css">
+.main-container {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+<div class="container-fluid main-container">
+
+
+<div id="header">
+<h1 class="title">Practical Machine Learning Project</h1>
+</div>
+
+
+<p>Machine learning prediction exercise for the “Weight Lifting Exercise Dataset”&quot; (<a href="http://groupware.les.inf.puc-rio.br/har">http://groupware.les.inf.puc-rio.br/har</a>)</p>
+<div id="download-the-data" class="section level4">
+<h4>Download the data</h4>
+<pre class="r"><code># download training data
+url &lt;- &quot;http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv&quot;
+trainingFile=&quot;pml-training.csv&quot;
+download.file(url, destfile=trainingFile, method=&quot;curl&quot;)
+# download test data
+url &lt;- &quot;http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv&quot;
+testingFile=&quot;pml-testing.csv&quot;
+download.file(url, destfile=testingFile, method=&quot;curl&quot;)</code></pre>
+</div>
+<div id="load-training-and-test-data-into-r" class="section level4">
+<h4>Load training and test data into R</h4>
+<pre class="r"><code># load training data
+trainingFile=&quot;pml-training.csv&quot;
+data.train &lt;- read.csv(trainingFile, header=TRUE, sep=&quot;,&quot;)
+# load test data
+testingFile=&quot;pml-testing.csv&quot;
+data.test &lt;- read.csv(testingFile, header=TRUE, sep=&quot;,&quot;)
+
+##  load required and useful packages
+library(caret)
+library(randomForest)
+library(gplots)
+library(RColorBrewer)
+library(AppliedPredictiveModeling)</code></pre>
+</div>
+<div id="data-exploration" class="section level3">
+<h3>Data Exploration</h3>
+<p>Examination of the data shows a number of non-informative columns as well as many with large fractions of missing values, either null or NA. The non-informative colums were removed along with any column with more than 10% missing or NA values.</p>
+<p>A number of the columns are factor variables consisting of a large number of unique factors represented as floating point numbers. Thus, the factor data was converted to numerical type. Columns with just 2 factors are null or division by 0, and will therefore be eliminated.</p>
+<pre class="r"><code>##  remove non-informative data colums:
+##   1:7
+##   amplitude_yaw_belt (19)
+##   amplitude_yaw_dumbbell (101) 
+##   amplitude_yaw_forearm (139)
+use.train &lt;- data.train[,-c(1:7,26,101,139)]
+##  result column index
+n.rows &lt;- dim(use.train)[1]
+result.idx &lt;- dim(use.train)[2]
+##  maximum fraction of missing values to retain a data column
+max.nas &lt;- 0.1
+
+##  Identify factor variables
+
+factor.list &lt;- c()
+factor.counts &lt;- c()
+for (i in names(use.train[-result.idx])) {
+    if (is.factor(use.train[[i]])) {
+        factor.list &lt;- c(factor.list, i)
+        factor.counts &lt;- c(factor.counts, nlevels(use.train[[i]]))
+        print(paste(i, &quot; :: &quot;, nlevels(use.train[[i]])))
+    }
+}</code></pre>
+<pre><code>## [1] &quot;kurtosis_roll_belt  ::  397&quot;
+## [1] &quot;kurtosis_picth_belt  ::  317&quot;
+## [1] &quot;kurtosis_yaw_belt  ::  2&quot;
+## [1] &quot;skewness_roll_belt  ::  395&quot;
+## [1] &quot;skewness_roll_belt.1  ::  338&quot;
+## [1] &quot;skewness_yaw_belt  ::  2&quot;
+## [1] &quot;max_yaw_belt  ::  68&quot;
+## [1] &quot;min_yaw_belt  ::  68&quot;
+## [1] &quot;kurtosis_roll_arm  ::  330&quot;
+## [1] &quot;kurtosis_picth_arm  ::  328&quot;
+## [1] &quot;kurtosis_yaw_arm  ::  395&quot;
+## [1] &quot;skewness_roll_arm  ::  331&quot;
+## [1] &quot;skewness_pitch_arm  ::  328&quot;
+## [1] &quot;skewness_yaw_arm  ::  395&quot;
+## [1] &quot;kurtosis_roll_dumbbell  ::  398&quot;
+## [1] &quot;kurtosis_picth_dumbbell  ::  401&quot;
+## [1] &quot;kurtosis_yaw_dumbbell  ::  2&quot;
+## [1] &quot;skewness_roll_dumbbell  ::  401&quot;
+## [1] &quot;skewness_pitch_dumbbell  ::  402&quot;
+## [1] &quot;skewness_yaw_dumbbell  ::  2&quot;
+## [1] &quot;max_yaw_dumbbell  ::  73&quot;
+## [1] &quot;min_yaw_dumbbell  ::  73&quot;
+## [1] &quot;kurtosis_roll_forearm  ::  322&quot;
+## [1] &quot;kurtosis_picth_forearm  ::  323&quot;
+## [1] &quot;kurtosis_yaw_forearm  ::  2&quot;
+## [1] &quot;skewness_roll_forearm  ::  323&quot;
+## [1] &quot;skewness_pitch_forearm  ::  319&quot;
+## [1] &quot;skewness_yaw_forearm  ::  2&quot;
+## [1] &quot;max_yaw_forearm  ::  45&quot;
+## [1] &quot;min_yaw_forearm  ::  45&quot;</code></pre>
+<pre class="r"><code>##  Convert factor data to numerical type and missing values to NAs.
+##  Null values (numerical or factor) will be nonverted to NAs.
+##  Remove data columns with a large fraction of NAs (max.na)
+
+for (i in names(use.train[-result.idx])) {
+    use.train[[i]] &lt;- as.numeric(as.character(use.train[[i]]))
+    frac.nas &lt;- length(use.train[[i]][is.na(use.train[[i]])]) / n.rows
+    if (frac.nas &gt; max.nas) {
+        # remove column
+        use.train &lt;- use.train[,-which(names(use.train) %in% c(i))]
+    }
+}
+result.idx &lt;- dim(use.train)[2]</code></pre>
+<div id="predictor-correlation-heatmap" class="section level4">
+<h4>Predictor correlation heatmap</h4>
+<p>To identify groups of similar predictors a heatmap of the pairwise correlations was generated. Predictors with correlation values close to 1 or -1 are related and therefore not independent. These can be either pruned or combined into co-factors in order to test ways pf improving the model. Initially, this step is left to the automatic treatment by the caret package preProcess function.</p>
+<pre class="r"><code>##  calculate pair-wise correlations for all predictors
+train.cor &lt;- as.matrix(cor(use.train[,-result.idx],use.train[,-result.idx]))
+
+##  display the most correlated or anti-correlated predictor pairs
+for (i in dimnames(train.cor)[[1]]) {
+    for (j in dimnames(train.cor)[[2]]) {
+        if (i != j &amp;&amp; abs(train.cor[i,j]) &gt; 0.8) {
+            print(paste(i, &quot; : &quot;, j, &quot; =&gt; cor=&quot;, train.cor[i,j], sep=&#39;&#39;))
+        }
+    }
+}</code></pre>
+<pre><code>## [1] &quot;roll_belt : yaw_belt =&gt; cor=0.815229713772366&quot;
+## [1] &quot;roll_belt : total_accel_belt =&gt; cor=0.980924143698649&quot;
+## [1] &quot;roll_belt : accel_belt_y =&gt; cor=0.924898265903547&quot;
+## [1] &quot;roll_belt : accel_belt_z =&gt; cor=-0.992008512879117&quot;
+## [1] &quot;pitch_belt : accel_belt_x =&gt; cor=-0.965733396777588&quot;
+## [1] &quot;pitch_belt : magnet_belt_x =&gt; cor=-0.884172747229078&quot;
+## [1] &quot;yaw_belt : roll_belt =&gt; cor=0.815229713772366&quot;
+## [1] &quot;total_accel_belt : roll_belt =&gt; cor=0.980924143698649&quot;
+## [1] &quot;total_accel_belt : accel_belt_y =&gt; cor=0.927806920706301&quot;
+## [1] &quot;total_accel_belt : accel_belt_z =&gt; cor=-0.974931730075642&quot;
+## [1] &quot;accel_belt_x : pitch_belt =&gt; cor=-0.965733396777588&quot;
+## [1] &quot;accel_belt_x : magnet_belt_x =&gt; cor=0.892091276102237&quot;
+## [1] &quot;accel_belt_y : roll_belt =&gt; cor=0.924898265903547&quot;
+## [1] &quot;accel_belt_y : total_accel_belt =&gt; cor=0.927806920706301&quot;
+## [1] &quot;accel_belt_y : accel_belt_z =&gt; cor=-0.9333854057113&quot;
+## [1] &quot;accel_belt_z : roll_belt =&gt; cor=-0.992008512879117&quot;
+## [1] &quot;accel_belt_z : total_accel_belt =&gt; cor=-0.974931730075642&quot;
+## [1] &quot;accel_belt_z : accel_belt_y =&gt; cor=-0.9333854057113&quot;
+## [1] &quot;magnet_belt_x : pitch_belt =&gt; cor=-0.884172747229078&quot;
+## [1] &quot;magnet_belt_x : accel_belt_x =&gt; cor=0.892091276102237&quot;
+## [1] &quot;gyros_arm_x : gyros_arm_y =&gt; cor=-0.918182137864574&quot;
+## [1] &quot;gyros_arm_y : gyros_arm_x =&gt; cor=-0.918182137864574&quot;
+## [1] &quot;accel_arm_x : magnet_arm_x =&gt; cor=0.814273178176859&quot;
+## [1] &quot;magnet_arm_x : accel_arm_x =&gt; cor=0.814273178176859&quot;
+## [1] &quot;magnet_arm_y : magnet_arm_z =&gt; cor=0.814445522779317&quot;
+## [1] &quot;magnet_arm_z : magnet_arm_y =&gt; cor=0.814445522779317&quot;
+## [1] &quot;pitch_dumbbell : accel_dumbbell_x =&gt; cor=0.808288506962984&quot;
+## [1] &quot;yaw_dumbbell : accel_dumbbell_z =&gt; cor=0.849132181253442&quot;
+## [1] &quot;gyros_dumbbell_x : gyros_dumbbell_z =&gt; cor=-0.978950698128391&quot;
+## [1] &quot;gyros_dumbbell_x : gyros_forearm_z =&gt; cor=-0.914476413154389&quot;
+## [1] &quot;gyros_dumbbell_z : gyros_dumbbell_x =&gt; cor=-0.978950698128391&quot;
+## [1] &quot;gyros_dumbbell_z : gyros_forearm_z =&gt; cor=0.933042179694563&quot;
+## [1] &quot;accel_dumbbell_x : pitch_dumbbell =&gt; cor=0.808288506962984&quot;
+## [1] &quot;accel_dumbbell_z : yaw_dumbbell =&gt; cor=0.849132181253442&quot;
+## [1] &quot;gyros_forearm_y : gyros_forearm_z =&gt; cor=0.845562592424503&quot;
+## [1] &quot;gyros_forearm_z : gyros_dumbbell_x =&gt; cor=-0.914476413154389&quot;
+## [1] &quot;gyros_forearm_z : gyros_dumbbell_z =&gt; cor=0.933042179694563&quot;
+## [1] &quot;gyros_forearm_z : gyros_forearm_y =&gt; cor=0.845562592424503&quot;</code></pre>
+<pre class="r"><code>##  set up a color palette to emphasize high correlation pairs
+my_palette &lt;- colorRampPalette(c(&quot;cyan&quot;,&quot;blue&quot;,&quot;black&quot;,&quot;black&quot;,&quot;black&quot;,&quot;brown&quot;, &quot;yellow&quot;))(n=20)
+##  draw heatmap
+heatmap.2(train.cor, 
+          symm=TRUE,
+          main=&quot;Predictor Correlations&quot;, # heat map title
+          notecol=&quot;black&quot;,       # change font color of cell labels to black
+          density.info=&quot;none&quot;,   # turn off density plot inside color legend
+          trace=&quot;none&quot;,          # turn off trace lines inside the heatmap
+          margins=c(12,9),       # widen margins around plot
+          col=my_palette,        # choose color palette
+          keysize=1.,            # size of color legend image
+          key.par=list(cex=0.7), # key text size
+          key.xlab=&quot;Correlation value&quot;, # color key axis label
+          dendrogram=&quot;none&quot;      # no dendrogram
+#          dendrogram=&quot;row&quot;)      # draw row dendrogram
+)</code></pre>
+<p><img src="Project_short_files/figure-html/unnamed-chunk-4.png" title="plot of chunk unnamed-chunk-4" alt="plot of chunk unnamed-chunk-4" width="960" /></p>
+<p>A feature plot can also be used to visually examine the similarity between feature pairs. Given the large number of features, it is impractical to look at a full pairwise view, therefore, individual features can be compared based on the heatmap correlation information. Below is an example of 3 highly correlated predictors: ‘roll_belt’,‘accel_belt_y’,‘accel_belt_z’. Data smapling (1000 random rows of 19622 in full training set) is used to prevent loss of visibility of overlapping data points from different classes.</p>
+<pre class="r"><code>transparentTheme(trans = .4)
+
+myColors &lt;- c(&quot;#000000&quot;, &quot;#7fff00&quot;, &quot;#8b0000&quot;, &quot;#9932cc&quot;, &quot;#ff7f00&quot;, &quot;#458b00&quot;, &quot;#008b8b&quot;, &quot;#0000ff&quot;, &quot;#ffff00&quot; )
+pch_vector &lt;- rep(16, 5)
+my_settings &lt;- list(superpose.symbol=list(alpha=rep(.4,5), col=myColors, cex=rep(0.8, 5), 
+               fill=myColors, font=rep(1, 5), pch=pch_vector))
+##  example
+set.seed(51515)
+use.train.slice &lt;- use.train[sample(nrow(use.train), 1000),]
+featurePlot(x=use.train.slice[,c(&#39;roll_belt&#39;,&#39;accel_belt_y&#39;,&#39;accel_belt_z&#39;)], y=use.train.slice$classe, 
+            plot=&quot;pairs&quot;, auto.key=list(columns = 5), par.settings=my_settings)</code></pre>
+<p><img src="Project_short_files/figure-html/unnamed-chunk-5.png" title="plot of chunk unnamed-chunk-5" alt="plot of chunk unnamed-chunk-5" width="960" /></p>
+<p>Two pre-processing strategies were tested. First, using principal components and removing all NAs. Second, centering and scaling all predictors, and using knn imputation for missing data.</p>
+<p>A random forest model was built for each training data set with 5-fold cross validation. Construction of these models is time consuming. Accuracy for the PCA-based model was 0.974, and 0.995 for the knn imputed data.</p>
+<pre class="r"><code>set.seed(1966)
+inTrain = createDataPartition(use.train$classe, p=0.7, list=FALSE)
+training = use.train[ inTrain,]    ## 70% of the data
+testing = use.train[-inTrain,]     ## 30% of the data</code></pre>
+<pre class="r"><code>###
+###   PCA pre-processing
+###
+
+## last column is the result (classe)
+preProc.1 &lt;- preProcess(training[,-result.idx], na.remove = TRUE, method=&quot;pca&quot;, thresh=.9)
+trainPC.1 &lt;- predict(preProc.1, training[,-result.idx])
+modFit.1 &lt;- train(training$classe ~ ., data=trainPC.1, method=&quot;rf&quot;, 
+                  trControl=trainControl(method=&quot;cv&quot;, number=5),
+                  prox=TRUE, allowParallel=TRUE)
+print(modFit.1)</code></pre>
+<pre><code>## Random Forest 
+## 
+## 13737 samples
+##    17 predictor
+##     5 classes: &#39;A&#39;, &#39;B&#39;, &#39;C&#39;, &#39;D&#39;, &#39;E&#39; 
+## 
+## No pre-processing
+## Resampling: Cross-Validated (5 fold) 
+## 
+## Summary of sample sizes: 10990, 10990, 10989, 10991, 10988 
+## 
+## Resampling results across tuning parameters:
+## 
+##   mtry  Accuracy  Kappa   Accuracy SD  Kappa SD
+##    2    0.9659    0.9569  0.005017     0.006353
+##   10    0.9611    0.9507  0.005225     0.006609
+##   18    0.9532    0.9408  0.008061     0.010190
+## 
+## Accuracy was used to select the optimal model using  the largest value.
+## The final value used for the model was mtry = 2.</code></pre>
+<pre class="r"><code>modFit.1$finalModel</code></pre>
+<pre><code>## 
+## Call:
+##  randomForest(x = x, y = y, mtry = param$mtry, proximity = TRUE, allowParallel = TRUE) 
+##                Type of random forest: classification
+##                      Number of trees: 500
+## No. of variables tried at each split: 2
+## 
+##         OOB estimate of  error rate: 2.86%
+## Confusion matrix:
+##      A    B    C    D    E class.error
+## A 3861   11   24    8    2     0.01152
+## B   54 2557   40    2    5     0.03800
+## C    4   45 2319   25    3     0.03214
+## D   13    7  100 2129    3     0.05462
+## E    1   10   16   20 2478     0.01861</code></pre>
+<pre class="r"><code>testPC.1 &lt;- predict(preProc.1, testing[,-result.idx])
+cm.1 &lt;- confusionMatrix(testing$classe, predict(modFit.1, testPC.1))
+cm.1</code></pre>
+<pre><code>## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction    A    B    C    D    E
+##          A 1657    7    3    6    1
+##          B   24 1094   21    0    0
+##          C    2   18  994    8    4
+##          D    1    2   40  920    1
+##          E    1    5    6    3 1067
+## 
+## Overall Statistics
+##                                        
+##                Accuracy : 0.974        
+##                  95% CI : (0.97, 0.978)
+##     No Information Rate : 0.286        
+##     P-Value [Acc &gt; NIR] : &lt; 2e-16      
+##                                        
+##                   Kappa : 0.967        
+##  Mcnemar&#39;s Test P-Value : 4.86e-06     
+## 
+## Statistics by Class:
+## 
+##                      Class: A Class: B Class: C Class: D Class: E
+## Sensitivity             0.983    0.972    0.934    0.982    0.994
+## Specificity             0.996    0.991    0.993    0.991    0.997
+## Pos Pred Value          0.990    0.960    0.969    0.954    0.986
+## Neg Pred Value          0.993    0.993    0.986    0.997    0.999
+## Prevalence              0.286    0.191    0.181    0.159    0.182
+## Detection Rate          0.282    0.186    0.169    0.156    0.181
+## Detection Prevalence    0.284    0.194    0.174    0.164    0.184
+## Balanced Accuracy       0.990    0.981    0.964    0.986    0.996</code></pre>
+<pre class="r"><code>###
+###   knn imputation pre-processing
+###
+
+training = use.train[ inTrain,]    ## 70% of the data
+testing = use.train[-inTrain,]     ## 30% of the data
+
+preProc.2 &lt;- preProcess(training[,-result.idx], k=5, knnSummary=mean, method=c(&quot;center&quot;, &quot;scale&quot;, &quot;knnImpute&quot;))
+
+trainPC.2 &lt;- predict(preProc.2, training[,-result.idx])
+
+modFit.2 &lt;- train(training$classe ~ ., data=trainPC.2, method=&quot;rf&quot;, trControl=trainControl(method=&quot;cv&quot;,number=5),
+                prox=TRUE, allowParallel=TRUE)
+print(modFit.2)</code></pre>
+<pre><code>## Random Forest 
+## 
+## 13737 samples
+##    51 predictor
+##     5 classes: &#39;A&#39;, &#39;B&#39;, &#39;C&#39;, &#39;D&#39;, &#39;E&#39; 
+## 
+## No pre-processing
+## Resampling: Cross-Validated (5 fold) 
+## 
+## Summary of sample sizes: 10989, 10988, 10990, 10990, 10991 
+## 
+## Resampling results across tuning parameters:
+## 
+##   mtry  Accuracy  Kappa   Accuracy SD  Kappa SD
+##    2    0.9907    0.9882  0.001516     0.001919
+##   27    0.9903    0.9878  0.002118     0.002681
+##   52    0.9842    0.9800  0.004379     0.005542
+## 
+## Accuracy was used to select the optimal model using  the largest value.
+## The final value used for the model was mtry = 2.</code></pre>
+<pre class="r"><code>modFit.2$finalModel</code></pre>
+<pre><code>## 
+## Call:
+##  randomForest(x = x, y = y, mtry = param$mtry, proximity = TRUE,      allowParallel = TRUE) 
+##                Type of random forest: classification
+##                      Number of trees: 500
+## No. of variables tried at each split: 2
+## 
+##         OOB estimate of  error rate: 0.7%
+## Confusion matrix:
+##      A    B    C    D    E class.error
+## A 3905    1    0    0    0    0.000256
+## B   10 2642    6    0    0    0.006020
+## C    0   24 2370    2    0    0.010851
+## D    0    0   46 2205    1    0.020870
+## E    0    0    1    5 2519    0.002376</code></pre>
+<pre class="r"><code>testPC.2 &lt;- predict(preProc.2, testing[,-result.idx])
+cm.2 &lt;- confusionMatrix(testing$classe, predict(modFit.2, testPC.2))
+cm.2</code></pre>
+<pre><code>## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction    A    B    C    D    E
+##          A 1674    0    0    0    0
+##          B    7 1132    0    0    0
+##          C    0    7 1019    0    0
+##          D    0    0   12  950    2
+##          E    0    0    0    2 1080
+## 
+## Overall Statistics
+##                                         
+##                Accuracy : 0.995         
+##                  95% CI : (0.993, 0.997)
+##     No Information Rate : 0.286         
+##     P-Value [Acc &gt; NIR] : &lt;2e-16        
+##                                         
+##                   Kappa : 0.994         
+##  Mcnemar&#39;s Test P-Value : NA            
+## 
+## Statistics by Class:
+## 
+##                      Class: A Class: B Class: C Class: D Class: E
+## Sensitivity             0.996    0.994    0.988    0.998    0.998
+## Specificity             1.000    0.999    0.999    0.997    1.000
+## Pos Pred Value          1.000    0.994    0.993    0.985    0.998
+## Neg Pred Value          0.998    0.999    0.998    1.000    1.000
+## Prevalence              0.286    0.194    0.175    0.162    0.184
+## Detection Rate          0.284    0.192    0.173    0.161    0.184
+## Detection Prevalence    0.284    0.194    0.174    0.164    0.184
+## Balanced Accuracy       0.998    0.996    0.993    0.998    0.999</code></pre>
+<div id="prediction-of-20-test-cases." class="section level5">
+<h5>Prediction of 20 test cases.</h5>
+<p>Test case data has to be pre-processed in the same way as the training data prior to caret preProcess handling. Specifically, conversion of factor column data to numeric type.</p>
+<p>For the final prediction, the second model was selected, being more accurate on the training data.</p>
+<pre class="r"><code>##  pre-process test case data as training data
+use.test &lt;- data.test[,-c(1:7,26,101,139)]
+
+for (i in names(use.test)) {
+    if (i %in% names(use.train)) {
+        use.test[[i]] &lt;- as.numeric(as.character(use.test[[i]]))
+    } else {
+        use.test &lt;- use.test[,-which(names(use.test) %in% c(i))]
+    }
+}
+
+test.pred &lt;- predict(preProc.2, use.test)
+new.pred.res &lt;- predict(modFit.2, test.pred)
+new.pred.res</code></pre>
+<pre><code>##  [1] B A B A A E D B A A B C B A E E A B B B
+## Levels: A B C D E</code></pre>
+</div>
+</div>
+</div>
+
+
+</div>
+
+<script>
+
+// add bootstrap table styles to pandoc tables
+$(document).ready(function () {
+  $('tr.header').parent('thead').parent('table').addClass('table table-condensed');
+});
+
+</script>
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>
